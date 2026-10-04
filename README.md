@@ -975,3 +975,233 @@ EXPOSE 3000 ──────────> Documentation only (Metadata)
 ```
 
 > 💡 *We will study the `EXPOSE` instruction in deeper detail when we begin writing our own Dockerfiles!*
+
+# Lesson 6 — Understanding Docker Images in Depth 🐳
+
+Now we go one level deeper into Docker Images. This is an important topic because almost everything in Docker starts with an image.
+
+### 1. What exactly is a Docker Image?
+
+A Docker image is a **read-only package/template** containing everything needed to create a container.
+
+For example, a Node.js image can contain:
+* Node.js runtime
+* Linux filesystem
+* npm
+* Application dependencies
+* Your application code
+* Configuration
+
+Then Docker uses that image to create a container:
+
+```text
+             Docker Image
+                  │
+                  │ docker run
+                  ▼
+          ┌───────────────┐
+          │   Container   │
+          │               │
+          │ Node.js App   │
+          └───────────────┘
+```
+
+> 💡 **Think of it this way:**  
+> **Image** = Blueprint  
+> **Container** = Running instance of that blueprint  
+
+---
+
+### 2. What is actually inside an image?
+
+Suppose you create this `Dockerfile`:
+
+```dockerfile
+FROM node:22
+
+WORKDIR /app
+
+COPY package*.json ./
+
+RUN npm install
+
+COPY . .
+
+CMD ["node", "server.js"]
+```
+
+Docker doesn't treat this file as one single giant block. Instead, it creates **layers**.
+
+Conceptually, the image structure looks like this:
+```text
+┌─────────────────────────────┐
+│ CMD ["node", "server.js"]   │
+├─────────────────────────────┤
+│ COPY . .                    │
+├─────────────────────────────┤
+│ RUN npm install             │
+├─────────────────────────────┤
+│ COPY package*.json ./       │
+├─────────────────────────────┤
+│ WORKDIR /app                │
+├─────────────────────────────┤
+│ node:22 base image          │
+└─────────────────────────────┘
+```
+These distinct slices are called **image layers**.
+
+---
+
+### 3. Why does Docker use layers?
+
+Imagine you have a Node project structured like this:
+```text
+my-app/
+├── package.json
+├── package-lock.json
+├── server.js
+├── routes/
+├── controllers/
+└── models/
+```
+
+When you build your image for the first time, it executes sequentially:
+```text
+Downloading Node image ➔ Installing dependencies ➔ Copying application ➔ Building image
+```
+
+Now imagine you change only **one single file**, like `server.js`. If Docker had to redo every step from scratch, it would waste time downloading Node and re-running `npm install`.
+
+Instead, Docker utilizes its **build cache**. It safely reuses the layers that haven't changed:
+* `node:22` ➔ ✅ Cached
+* `package.json` ➔ ✅ Cached
+* `npm install` ➔ ✅ Cached
+
+Docker will only rebuild the specific layer affected by your modified source code, making subsequent builds incredibly fast.
+
+---
+
+### 4. Image Layers are Read-Only
+
+Every single layer inside an image is completely **immutable (read-only)**. When Docker creates a running container from that image, it dynamically injects a thin, temporary **writable layer** directly on top.
+
+```text
+             Container
+┌──────────────────────────────┐
+│  Writable Container Layer    │ ← All modifications happen here
+├──────────────────────────────┤
+│  Image Layer                 │
+├──────────────────────────────┤
+│  Image Layer                 │
+├──────────────────────────────┤
+│  Image Layer                 │
+└──────────────────────────────┘
+```
+
+Suppose the underlying image contains a file at `/app/server.js`, and you decide to modify it inside the running container. Docker does not alter the original image layer. Instead, it copies the file up to the container's **writable layer** and modifies it there.
+
+```text
+Image ➔ Creates ➔ Container ➔ Writable Changes
+```
+
+---
+
+### 5. Why shouldn't we store important data inside the container?
+
+Because the container's writable layer is **temporary and tied directly to the lifecycle of that container instance**.
+
+```text
+Container
+   │
+   ├── Application
+   ├── Logs
+   └── Database Data
+```
+
+If you destroy the container using `docker rm my-container`, the writable layer is instantly wiped out, and **all stored data disappears permanently**. 
+### 7. What is a Base Image?
+
+A base image is the **starting point** for your custom image.
+
+For example:
+```dockerfile
+FROM node:22
+```
+
+This instruction means: *"Start building my image on top of the existing `node:22` image."* The Node image itself is built on top of a foundational Linux-based operating system image.
+
+Conceptually:
+```text
+Your application image
+        ↓
+     node:22
+        ↓
+   Linux base
+```
+
+---
+
+### 🏷️ What is a Docker Image Tag?
+
+When you pull or reference an image like this:
+```bash
+docker pull node:22
+```
+`22` is the **tag**. The general format is always:
+```text
+image-name:tag
+```
+
+Examples of standard tags:
+* `node:22`
+* `nginx:1.29`
+* `ubuntu:24.04`
+* `mongo:8`
+
+You can also assign custom tags to your own images when building them:
+```bash
+docker build -t my-api:1.0 .
+```
+In this example:
+* **`my-api`** = Image name
+* **`1.0`** = Tag version
+
+---
+
+### ⚡ Docker Image Cache ⭐⭐⭐
+
+Suppose you are using this `Dockerfile`:
+
+```dockerfile
+FROM node:22
+
+WORKDIR /app
+
+COPY package*.json ./
+
+RUN npm install
+
+COPY . .
+
+CMD ["node", "server.js"]
+```
+
+#### First Build:
+```bash
+docker build -t my-api .
+```
+Docker executes every single instruction sequentially from top to bottom.
+
+#### Subsequent Builds:
+If you modify only `server.js` and run the build command again, Docker evaluates each layer. You will see output like this:
+```text
+=> [internal] load build definition from Dockerfile       ✅ CACHED
+=> [internal] load .dockerignore                         ✅ CACHED
+=> [1/5] FROM docker.io/library/node:22                  ✅ CACHED
+=> [2/5] WORKDIR /app                                    ✅ CACHED
+=> [3/5] COPY package*.json ./                           ✅ CACHED
+=> [4/5] RUN npm install                                 ✅ CACHED
+=> [5/5] COPY . .                                        🔄 EXECUTING...
+```
+
+Because the foundational layers, dependencies, and package configurations did not change, Docker reuses the **CACHED** layers instantly. It only re-runs the `COPY . .` instruction and any steps after it to capture your updated code change, saving significant development time.
