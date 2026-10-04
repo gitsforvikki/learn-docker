@@ -698,3 +698,280 @@ docker exec -it <container_name> bash
 # Run a container in the background with port mapping and a custom name
 docker run -d --name <custom_name> -p <host_port>:<container_port> <image_name>
 ```
+
+# 🐳 Lesson 5 — docker run Deep Dive
+
+-p — Port Mapping ⭐
+
+This is one of the most important concepts.
+
+Suppose Nginx is listening inside the container on:
+
+Port 80
+
+Your computer is outside the container.
+
+You want:
+
+http://localhost:8080
+
+to reach Nginx.
+
+Use:
+```bash
+docker run -d \
+  --name my-nginx \
+  -p 8080:80 \
+  nginx
+```
+
+---
+
+### 🌐 Understanding `-p HOST_PORT:CONTAINER_PORT`
+
+The exact syntax for port mapping is always:
+```text
+-p HOST_PORT:CONTAINER_PORT
+```
+
+Therefore, `-p 8080:80` means:
+```text
+      Host Machine                  Container
+┌──────────────────────┐      ┌──────────────────┐
+│  localhost           │      │                  │
+│    :8080 ─────────────────> │  :80             │
+│                      │      │    Nginx Server  │
+└──────────────────────┘      └──────────────────┘
+```
+
+#### Why can't we simply use port 80 on the host?
+You actually could:
+```bash
+docker run -d -p 80:80 nginx
+```
+Traffic flows directly: `localhost:80 ➔ container:80`.  
+However, if another application (like a local web server or another container) is already using host port 80, Docker cannot bind to it, and the command will fail.
+
+---
+
+### 🏢 Host Port vs. Container Port
+
+This distinction is extremely important for interviews and real-world deployments.
+
+Suppose you run:
+```bash
+docker run -p 5000:3000 my-node-app
+```
+
+This maps the ports like this:
+```text
+     HOST                  CONTAINER
+localhost:5000   ───────>    :3000
+```
+* The Node.js application inside the container is actively listening on **`container:3000`**.
+* External users access your application via **`localhost:5000`**.
+
+```text
+User ➔ localhost:5000 ➔ Docker Routing ➔ container:3000 ➔ Node.js App
+```
+
+---
+
+### ⚠️ A Common Beginner Mistake
+
+Suppose your internal Node.js application specifies:
+```javascript
+app.listen(3000);
+```
+
+If you run this command, it works perfectly:
+```bash
+docker run -p 3000:3000 my-app
+```
+
+But if you try running this command, **it will fail**:
+```bash
+docker run -p 5000:5000 my-app
+```
+
+#### Why doesn't it work?
+Because you explicitly told Docker to route traffic from **host port 5000** to **container port 5000**. However, your application inside the container isn't listening on port 5000; it is listening on **container port 3000**. The traffic goes to a dead end inside the container.
+
+#### The Correct Fix:
+To expose the app on port 5000 of your host computer, you must route it to the exact port the application expects inside:
+```text
+host 5000 ➔ container 3000
+```
+```bash
+docker run -p 5000:3000 my-app
+```
+### 🔑 `-e` — Environment Variables
+
+Applications frequently require environment variables to manage configurations, credentials, and settings safely, such as:
+* `NODE_ENV`
+* `PORT`
+* `DATABASE_URL`
+* `JWT_SECRET`
+* `API_KEY`
+
+Docker allows you to pass these variables directly into the container using the **`-e`** (or `--env`) flag.
+
+#### Single Environment Variable:
+```bash
+docker run -e NODE_ENV=production nginx
+```
+
+#### Multiple Environment Variables:
+You can use the flag multiple times in a single command to inject several variables:
+```bash
+docker run \
+  -e NODE_ENV=production \
+  -e PORT=3000 \
+  -e API_KEY=xyz123 \
+  my-app
+```
+
+---
+
+### 🧹 `--rm` — Automatic Cleanup
+
+By default, when a container stops running, it remains on your disk in a "Stopped" status (`Exited`) until you explicitly delete it with `docker rm`. 
+
+If you are spinning up a temporary container for quick testing or one-off tasks, you can use the **`--rm`** flag:
+
+```bash
+docker run --rm nginx
+```
+
+#### The Difference:
+* **Without `--rm`:** `Run ➔ Stop ➔ Container remains on disk (requires manual cleanup)`
+* **With `--rm`:** `Run ➔ Stop ➔ Container is automatically deleted instantly`
+### 🔄 `--restart` — Restart Policies
+
+You can tell Docker how a container should behave when its internal processes exit or when the Docker daemon itself restarts (such as after a system reboot).
+
+```bash
+docker run -d \
+  --restart unless-stopped \
+  nginx
+```
+
+#### Common Restart Policies:
+* **`no`** ➔ Do not automatically restart the container (Default).
+* **`always`** ➔ Always restart the container if it stops. If the system reboots, it starts automatically.
+* **`on-failure`** ➔ Restart only if the container exits due to an error (non-zero exit code).
+* **`unless-stopped`** ➔ Always restart the container unless it was explicitly stopped by the user before the daemon restarted.
+
+> 💡 **Tip:** Setting an explicit restart policy is a production-essential practice to ensure high availability for your applications.
+
+---
+
+### 🏁 Overriding the Container Command
+
+The general syntax for starting a container is:
+```text
+docker run [OPTIONS] IMAGE [COMMAND] [ARG...]
+```
+You can optionally append a `[COMMAND]` at the very end to override the default process defined inside the image.
+
+#### ⚠️ A Crucial Concept: Why do some containers exit immediately?
+If you execute:
+```bash
+docker run ubuntu
+```
+You might expect a full operating system environment to stay running, but the container **exits immediately**. 
+
+A container only stays alive as long as its **primary foreground process** is running.
+
+```text
+Nginx Container                  Ubuntu Container
+  ├── Starts Nginx Process         ├── Starts default command (e.g., bash)
+  ├── Process stays alive          ├── No interactive input/long-running task
+  └── Container stays RUNNING      └── Process exits ➔ Container EXITS
+```
+
+#### 🕹️ Interactive Containers with `-it`
+To keep an OS container like Ubuntu alive and interact with it, you must allocate a terminal and run an interactive shell:
+
+```bash
+docker run -it ubuntu bash
+```
+
+Let's break down exactly what this does:
+* **`docker run`** ➔ Create and start the container.
+* **`-i`** ➔ Interactive (keeps STDIN open).
+* **`-t`** ➔ Allocates a pseudo-TTY (terminal).
+* **`ubuntu`** ➔ The image template to use.
+* **`bash`** ➔ The command overriding the default image entrypoint.
+
+Your terminal prompt will change to:
+```text
+root@abc123:/#
+```
+You are now inside the running Ubuntu container and can safely execute commands like `ls` or `pwd`. Type `exit` to leave.
+
+---
+
+### 🧩 `docker run` — Putting It All Together
+
+Now let's decode a fully featured production command:
+
+```bash
+docker run -d \
+  --name my-api \
+  -p 5000:3000 \
+  -e NODE_ENV=production \
+  --restart unless-stopped \
+  my-node-app
+```
+
+#### The Complete Breakdown:
+```text
+ docker run ................ Create + start container
+ ├── -d .................... Run in background (Detached mode)
+ ├── --name my-api ......... Assign a custom name to the container
+ ├── -p 5000:3000 .......... Map Host Port 5000 to Container Port 3000
+ ├── -e NODE_ENV=prod ...... Inject an environment variable
+ ├── --restart unless-st ... Apply the container restart policy
+ └── my-node-app ........... The foundation Docker Image to execute
+```
+
+### 🌐 A Critical Docker Networking Issue: `0.0.0.0` vs `127.0.0.1`
+
+Suppose your Node.js application runs inside Docker. In a standard local development environment, you might write:
+```javascript
+app.listen(3000);
+```
+When running inside a container, this is often not enough to allow external access. Instead, applications running inside Docker must be configured to explicitly listen on all network interfaces:
+```javascript
+app.listen(3000, "0.0.0.0");
+```
+
+#### Why is this necessary?
+* **`127.0.0.1` (localhost)** inside a container refers strictly to the container's *own internal loopback interface*. If your app binds only to `127.0.0.1`, it will reject traffic routing in from the outside host via the Docker network.
+* **`0.0.0.0`** tells the application to listen on *all available network interfaces* inside the container, allowing Docker to successfully forward inbound traffic from your host machine to your app.
+
+> 💡 *We will cover this thoroughly in the dedicated Docker Networking lesson, so don't worry if this concept feels brand new!*
+
+---
+
+### 📋 `EXPOSE` vs `-p` (The Ultimate Interview Question)
+
+This is one of the most frequent technical interview questions. You will eventually see a configuration file called a `Dockerfile` that contains the following instruction:
+```dockerfile
+EXPOSE 3000
+```
+It is a common mistake to assume that this command publishes the port to your computer. **It does not.**
+
+#### The Key Differences:
+* **`EXPOSE`**  
+  ↳ **Documentation / Metadata.** It acts purely as a declaration or note stating that the application inside intends to use that port. It does not open or map anything on your host machine.
+* **`-p` (or `--publish`)**  
+  ↳ **Actual Network Action.** This is the runtime flag used during `docker run` that actually maps and opens up network access between your host machine and the container.
+
+```text
+EXPOSE 3000 ──────────> Documentation only (Metadata)
+-p 5000:3000 ─────────> Active traffic routing (Host 5000 ➔ Container 3000)
+```
+
+> 💡 *We will study the `EXPOSE` instruction in deeper detail when we begin writing our own Dockerfiles!*
