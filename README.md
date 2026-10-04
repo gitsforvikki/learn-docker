@@ -125,3 +125,186 @@ nginx Image
     │
     └──→ Container 3
 ```
+### Your first Docker mental model
+
+For now, remember this core relationship:
+
+```text
+             DOCKER
+                │
+        ┌───────┴───────┐
+        ↓               ↓
+      IMAGE         CONTAINER
+        │               │
+     Template       Running
+        │           application
+        └──────┬────────┘
+               │
+          Application
+```
+
+And the overall workflow and purpose:
+
+```text
+ Application + Dependencies + Environment
+                   ↓
+              Docker Image
+                   ↓
+               Container
+                   ↓
+           Runs consistently
+```
+# Docker Architecture & How `docker run` Works
+
+### Docker Client
+When you type:
+```bash
+docker run nginx
+```
+The `docker` command is the **Docker CLI** (Command Line Interface). It is the interface you use to communicate with Docker. 
+
+The CLI itself doesn't directly create the container. It sends requests to the Docker daemon.
+
+```text
+You
+ ↓
+Docker CLI
+ ↓
+"Hey Docker, run nginx"
+```
+
+---
+
+### Docker Daemon
+The Docker daemon is usually called **`dockerd`**. It is the process responsible for managing Docker objects such as:
+* Containers
+* Images
+* Networks
+* Volumes
+
+Think of it as the worker/manager behind Docker:
+
+```text
+Docker CLI
+     │
+     │ request
+     ↓
+  dockerd
+     │
+     ├── Images
+     ├── Containers
+     ├── Networks
+     └── Volumes
+```
+When you execute `docker run nginx`, the CLI communicates with `dockerd`, and `dockerd` performs the work.
+
+---
+
+### Docker Engine & API
+You will hear the term **Docker Engine** frequently. At a high level, Docker Engine is the core Docker technology that provides the functionality to build and run containers.
+
+A simplified mental model of Docker Engine:
+```text
+Docker Engine
+      │
+      ├── Docker daemon
+      ├── Docker API
+      └── Container runtime components
+```
+> 💡 **For interviews, understand:** Docker Engine is the core technology that enables Docker containers to be built and run.
+
+#### Docker API
+The Docker CLI communicates with the Docker daemon through an API. Conceptually:
+```text
+Terminal
+   │
+   │ docker run nginx
+   ↓
+Docker CLI
+   │
+   │ Docker API request
+   ↓
+Docker Daemon
+   │
+   ↓
+Create / start container
+```
+This design means Docker isn't limited to the CLI; other applications can communicate with Docker using the Docker API as well.
+
+---
+
+### Docker Registry & Docker Hub
+If you want to run `docker run nginx`, but you don't have the `nginx` image on your computer, where does Docker get it? From a **Docker registry**. A registry is a place where Docker images are stored.
+
+* **Docker Hub** is a popular public Docker registry. Think of it somewhat like GitHub, but for container images.
+
+---
+
+### What happens when you run `docker run nginx`?
+This is the most critical workflow to understand. Suppose you type `docker run nginx`:
+
+#### Step 1 — Docker CLI receives the command
+```text
+You ➔ docker run nginx
+```
+The Docker CLI understands: *"The user wants to create and start a container from the nginx image."*
+
+#### Step 2 — CLI communicates with Docker daemon
+```text
+Docker CLI ➔ Docker Daemon
+```
+The daemon checks whether the required image exists locally.
+
+#### Step 3 — Docker checks local images
+Suppose you don't have `nginx` locally. Docker needs to obtain it.
+
+#### Step 4 — Docker contacts the registry
+```text
+Docker Daemon ➔ "Give me nginx image" ➔ Docker Hub
+```
+Docker downloads the image. This operation is essentially what `docker pull nginx` does explicitly.
+
+#### Step 5 — Image is stored locally
+```text
+Local Docker ➔ nginx image
+```
+### Complete `docker run` Flow
+
+```text
+              docker run nginx
+                     │
+                     ↓
+                Docker CLI
+                     │
+                     ↓
+               Docker Daemon
+                     │
+              ┌──────┴──────┐
+              │             │
+     Image exists?       No image
+              │             │
+              │             ↓
+              │        Docker Registry
+              │             │
+              │             ↓
+              │        Download image
+              │             │
+              └──────┬──────┘
+                     ↓
+                nginx Image
+                     │
+                     ↓
+              Create Container
+                     │
+                     ↓
+               Start Container
+                     │
+                     ↓
+               Running Nginx
+```
+
+#### Step 6 — Docker creates a container
+The image is used as a template:
+```text
+nginx Image ➔ Create ➔ nginx Container
+```
