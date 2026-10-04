@@ -25,7 +25,7 @@ A lesson-by-lesson Docker learning path from fundamentals to production, followe
 - [Lesson 02 — Docker Architecture](lessons/02-docker-architecture.md)
 - [Lesson 03 — Containers vs Images](lessons/03-containers-vs-images.md)
 - [Lesson 04 — Docker CLI & Basic Commands](lessons/04-docker-cli-basic-commands.md)
-- [Lesson 05 — docker run](lessons/05-docker-run.md)
+- [Lesson 05 — docker run](lessons/05-docker-run-first-container.md)
 
 ## 2. Docker Images
 
