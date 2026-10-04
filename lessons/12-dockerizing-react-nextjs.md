@@ -1,0 +1,601 @@
+# Lesson 12 — Dockerizing React / Next.js
+
+## 1. What Does Dockerizing a Frontend Mean?
+
+Dockerizing a frontend means packaging the frontend application and the environment needed to build or serve it into a Docker image.
+
+The approach depends on the framework.
+
+### React SPA
+
+A production React application is commonly:
+
+```text
+React source
+    ↓
+npm run build
+    ↓
+Static files
+    ↓
+Nginx / web server
+    ↓
+Browser
+```
+
+### Next.js
+
+A Next.js application may require a Node.js runtime in production, especially when using:
+
+- Server Components
+- Server-side rendering
+- Route handlers
+- Server Actions
+- Dynamic server functionality
+
+Typical flow:
+
+```text
+Next.js source
+    ↓
+npm run build
+    ↓
+Next.js production output
+    ↓
+Node.js container
+    ↓
+Browser
+```
+
+Therefore, **React SPA and Next.js should not automatically use the same production Dockerfile**.
+
+---
+
+## 2. React SPA — Production Dockerfile
+
+For a Vite/React application that produces static files:
+
+```dockerfile
+FROM node:22-alpine AS builder
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm ci
+
+COPY . .
+RUN npm run build
+
+FROM nginx:alpine
+
+COPY --from=builder /app/dist /usr/share/nginx/html
+
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]
+```
+
+The important idea is:
+
+```text
+Node.js builder
+     ↓
+npm run build
+     ↓
+dist/
+     ↓
+Nginx runtime
+```
+
+Node.js is required for building, but it does not need to be present in the final static-serving image.
+
+---
+
+## 3. React Build Output
+
+Different React tools may use different output directories.
+
+For example:
+
+- Vite → usually `dist/`
+- Create React App → usually `build/`
+
+Always check the project's actual build configuration before writing:
+
+```dockerfile
+COPY --from=builder ...
+```
+
+Do not blindly assume the output directory.
+
+---
+
+## 4. React .dockerignore
+
+Example:
+
+```text
+node_modules
+.git
+.env
+coverage
+npm-debug.log
+```
+
+This prevents unnecessary files from entering the build context.
+
+---
+
+## 5. Build and Run a React Image
+
+Build:
+
+```bash
+docker build -t my-react-app:1.0 .
+```
+
+Run:
+
+```bash
+docker run -d --name my-react-app -p 8080:80 my-react-app:1.0
+```
+
+The mapping is:
+
+```text
+Host 8080 → Nginx 80
+```
+
+Open:
+
+```text
+http://localhost:8080
+```
+
+---
+
+## 6. Why Nginx for a React SPA?
+
+A production React SPA is usually just static HTML, CSS, JavaScript, and assets after the build.
+
+Nginx is useful because it is designed to efficiently serve static files.
+
+The production image can therefore avoid carrying:
+
+- Node.js
+- npm
+- Build dependencies
+- Source code
+- Development tooling
+
+This results in a focused runtime image.
+
+---
+
+## 7. React SPA Routing and Nginx
+
+A single-page application can use client-side routes such as:
+
+```text
+/
+ /dashboard
+ /profile
+ /settings
+```
+
+If the browser directly requests:
+
+```text
+/dashboard
+```
+
+Nginx may look for a physical `dashboard` file and return 404.
+
+For many React SPAs, Nginx needs a fallback to `index.html`.
+
+Example Nginx configuration:
+
+```nginx
+server {
+    listen 80;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}
+```
+
+This allows the React router to handle client-side routes.
+
+A custom Nginx configuration can be copied into the image:
+
+```dockerfile
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+```
+
+---
+
+## 8. Next.js Is Different
+
+Next.js can generate static output, but it can also require a Node.js runtime.
+
+For a normal Next.js application using server features, a Node.js runtime is commonly used.
+
+Example:
+
+```dockerfile
+FROM node:22-alpine AS builder
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm ci
+
+COPY . .
+RUN npm run build
+
+FROM node:22-alpine
+
+WORKDIR /app
+
+ENV NODE_ENV=production
+
+COPY package*.json ./
+RUN npm ci --omit=dev
+
+COPY --from=builder /app/.next ./.next
+COPY --from=builder /app/public ./public
+
+EXPOSE 3000
+
+USER node
+
+CMD ["npm", "start"]
+```
+
+This is a simplified example. The exact files required depend on the Next.js configuration.
+
+---
+
+## 9. Next.js Standalone Output
+
+For a containerized Next.js application, the **standalone output** is often useful.
+
+In `next.config.js` or `next.config.ts`:
+
+```js
+const nextConfig = {
+  output: "standalone",
+};
+
+export default nextConfig;
+```
+
+After:
+
+```bash
+npm run build
+```
+
+Next.js creates a standalone server output under:
+
+```text
+.next/standalone
+```
+
+A production Dockerfile can copy the standalone output instead of installing the entire application dependency tree in the final image.
+
+Example:
+
+```dockerfile
+FROM node:22-alpine AS builder
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm ci
+
+COPY . .
+RUN npm run build
+
+FROM node:22-alpine
+
+WORKDIR /app
+
+ENV NODE_ENV=production
+
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.next/static ./.next/static
+COPY --from=builder /app/public ./public
+
+USER node
+
+EXPOSE 3000
+
+CMD ["node", "server.js"]
+```
+
+The standalone server is generated by Next.js.
+
+### Important
+
+The exact standalone Dockerfile can differ depending on the project, Next.js version, package manager, and whether `public` exists.
+
+---
+
+## 10. Next.js Image and Static Assets
+
+With standalone output, the runtime image commonly needs:
+
+```text
+.next/standalone
+.next/static
+public/   (if the project uses it)
+```
+
+Conceptually:
+
+```text
+.next/standalone → server runtime
+.next/static     → static Next.js assets
+public/          → public application assets
+```
+
+Do not copy unnecessary source files into the final image.
+
+---
+
+## 11. Frontend Environment Variables
+
+Environment variables require special attention in frontend applications.
+
+### Build-time variables
+
+Many frontend variables are embedded into the generated client bundle during the build.
+
+For example, Vite commonly uses:
+
+```text
+VITE_API_URL
+```
+
+Next.js client-exposed variables commonly use:
+
+```text
+NEXT_PUBLIC_API_URL
+```
+
+These values may become visible to browser users.
+
+Therefore:
+
+**Never treat client-exposed frontend environment variables as secrets.**
+
+A public API URL is fine to expose; a database password is not.
+
+---
+
+## 12. Build-Time vs Runtime Configuration
+
+This distinction is important.
+
+### React static SPA
+
+If the value is compiled into the JavaScript bundle:
+
+```text
+Environment variable
+      ↓
+npm run build
+      ↓
+Static JavaScript
+      ↓
+Browser
+```
+
+Changing the container environment after the static files were built does not automatically change the already-generated bundle.
+
+### Next.js
+
+Next.js supports both server-side and client-side configuration patterns.
+
+Server-only values can remain on the server when they are not exposed to the client.
+
+Values intended for the browser must be treated as public.
+
+---
+
+## 13. Frontend Container Ports
+
+For React served by Nginx:
+
+```text
+Nginx → port 80
+```
+
+Example:
+
+```bash
+docker run -p 8080:80 my-react-app:1.0
+```
+
+For Next.js:
+
+```text
+Node.js → port 3000
+```
+
+Example:
+
+```bash
+docker run -p 8080:3000 my-next-app:1.0
+```
+
+The host port and container port do not have to be the same.
+
+---
+
+## 14. Development vs Production
+
+Frontend development containers are different from production containers.
+
+### Development
+
+Common requirements:
+
+- Source-code mounting
+- Hot reload
+- Development dependencies
+- Dev server
+- Frequent rebuilds
+
+### Production React SPA
+
+Usually:
+
+```text
+Build once
+   ↓
+Static assets
+   ↓
+Nginx
+```
+
+### Production Next.js
+
+Usually:
+
+```text
+Build
+   ↓
+Next.js production output
+   ↓
+Node.js runtime
+```
+
+Do not use a development server such as `npm run dev` as the production server.
+
+---
+
+## 15. Common Problems
+
+### Problem 1: React application returns 404 on refresh
+
+For client-side routing, configure the web server to fall back to `index.html`.
+
+### Problem 2: API URL is incorrect
+
+Check whether the frontend variable was available at the correct stage and whether the value is intended for the browser.
+
+### Problem 3: Next.js container starts but fails at runtime
+
+Check that all required runtime output was copied into the final image.
+
+For standalone output, verify:
+
+```text
+.next/standalone
+.next/static
+public/
+```
+
+as applicable.
+
+### Problem 4: Environment variable changed but frontend still uses old value
+
+For static frontend builds, the value may already be compiled into the JavaScript bundle. Rebuild the application when a build-time variable changes.
+
+### Problem 5: Browser cannot connect to the backend
+
+Check:
+
+- API URL
+- Docker port publishing
+- Browser vs container network context
+- CORS configuration
+- Whether the backend is reachable from the browser
+
+---
+
+## 16. Practical Comparison
+
+| Application | Build | Typical production server | Common container port |
+|---|---|---|---|
+| React SPA | Static build | Nginx | 80 |
+| Next.js with server features | Next.js production build | Node.js | 3000 |
+| Next.js static export | Static build | Nginx/web server | 80 |
+
+The correct choice depends on the application's architecture and Next.js configuration.
+
+---
+
+## 17. Interview Questions
+
+### Q1. How do you Dockerize a React application for production?
+
+Build the React application in a Node.js builder stage, then copy the generated static files into a lightweight web server such as Nginx.
+
+### Q2. Why use multi-stage builds for React?
+
+Node.js and build dependencies are required during compilation but are usually unnecessary for serving the final static files.
+
+### Q3. Why is Next.js different from a React SPA?
+
+Next.js can require a Node.js runtime for server-side features, while a standard React SPA can often be served entirely as static files.
+
+### Q4. What is Next.js standalone output?
+
+It is a deployment output that contains the files needed to run the Next.js server, allowing a smaller and more focused runtime image.
+
+### Q5. Are NEXT_PUBLIC_* variables secret?
+
+No. Values exposed with `NEXT_PUBLIC_` are intended to be available to browser-side code.
+
+### Q6. Why can changing a React environment variable require rebuilding the image?
+
+Because many frontend environment variables are embedded into the generated static JavaScript during the build.
+
+### Q7. Why does a React SPA need Nginx routing configuration?
+
+Because client-side routes are handled by JavaScript, while Nginx initially looks for physical files. The fallback to `index.html` lets the SPA router handle the route.
+
+---
+
+## Quick Revision
+
+```text
+React SPA
+   ↓
+npm run build
+   ↓
+Static files
+   ↓
+Nginx
+   ↓
+Browser
+```
+
+```text
+Next.js
+   ↓
+npm run build
+   ↓
+Production / Standalone output
+   ↓
+Node.js
+   ↓
+Browser
+```
+
+### Must Remember
+
+1. **React SPA production images commonly use a Node.js builder + Nginx runtime.**
+2. **Next.js may require a Node.js runtime when using server-side functionality.**
+3. **Use multi-stage builds to keep build dependencies out of the final image.**
+4. **React SPA client-side routes may require an Nginx `index.html` fallback.**
+5. **Frontend-exposed environment variables are public, not secrets.**
+6. **Static frontend environment values are commonly embedded during build time.**
+7. **Next.js standalone output can produce a focused runtime image.**
+8. **Do not use `npm run dev` as the production server.**
