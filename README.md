@@ -308,3 +308,37 @@ The image is used as a template:
 ```text
 nginx Image ➔ Create ➔ nginx Container
 ```
+## `docker pull` vs `docker run`
+
+This is another common beginner question. Let's break down the exact difference:
+
+### `docker pull nginx`
+**Download the nginx image.**
+```text
+Docker Hub ➔ nginx Image ➔ Your Computer
+```
+This command only fetches the image template. It **does not** start a container.
+
+### `docker run nginx`
+**Use the nginx image to create and start a container.**
+* If the image isn't available locally, Docker will generally **pull it first**, then run it.
+
+```text
+docker pull nginx  ➔  Download image
+docker run nginx   ➔  Download image (if missing) + Create Container + Start Container
+```
+
+---
+
+### One Image ➔ Many Containers
+This is an extremely important architectural concept. Suppose you have one single **nginx Image** stored on your machine. You can create multiple isolated running environments from it:
+
+```text
+nginx Image
+     │
+     ├── Container A (Running on Port 8080)
+     ├── Container B (Running on Port 8081)
+     └── Container C (Running on Port 8082)
+```
+
+All three containers are completely distinct running instances, but they all share the exact same foundation template.
