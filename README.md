@@ -342,3 +342,202 @@ nginx Image
 ```
 
 All three containers are completely distinct running instances, but they all share the exact same foundation template.
+
+
+
+
+# 🐳 Lesson 3 — Docker Images vs Containers ⭐
+
+### 1. First, the simplest definition
+
+Remember this:
+* **Image** = blueprint/template
+* **Container** = running instance created from that image
+
+For example:
+```text
+        nginx IMAGE
+        (template)
+             │
+       ┌─────┼─────┐
+       ↓     ↓     ↓
+ Container  Container  Container
+    A          B          C
+```
+One image can create many containers.
+
+---
+
+### 2. What is a Docker Image?
+A Docker image is a **read-only package/template** containing the files and metadata needed to create a container.
+
+For example, the `node` image contains things needed to run Node.js applications.
+
+---
+
+### 3. What is a Container?
+A container is a **created/running instance** of an image with its own writable container layer and isolated runtime environment.
+
+For example:
+```text
+nginx Image
+     │
+     ↓
+nginx Container
+     │
+     ↓
+Nginx process running
+```
+
+So the sequence is:
+```text
+Image ➔ Create container ➔ Start container ➔ Application runs
+```
+
+---
+
+### 4. Let's see it practically
+If Docker is installed, run:
+```bash
+docker images
+```
+You might initially see something like:
+```text
+REPOSITORY   TAG       IMAGE ID       CREATED       SIZE
+nginx        latest    abc123...      ...           ...
+```
+This shows **images**, not containers.
+
+Now run:
+```bash
+docker ps
+```
+You might see:
+```text
+CONTAINER ID   IMAGE   COMMAND   STATUS   PORTS   NAMES
+```
+This shows **currently running containers**.
+
+---
+
+### 5. Let's create our first container
+Run:
+```bash
+docker run nginx
+```
+
+Docker will follow this process:
+```text
+nginx image ➔ create container ➔ start container ➔ run nginx
+```
+
+Now open another terminal window and run:
+```bash
+docker ps
+```
+You should see something similar to:
+```text
+CONTAINER ID   IMAGE   STATUS          PORTS   NAMES
+abc123         nginx   Up 10 seconds           ...
+```
+Notice something important: The container is using the `nginx` image.
+
+---
+
+### 6. Container name
+By default, Docker generates a random name for your container. Instead, you can give it your own custom name using the `--name` flag:
+```bash
+docker run -d --name my-nginx nginx
+```
+
+---
+
+### 7. One image ➔ multiple containers
+This is an extremely important concept. You can spin up multiple isolated instances from a single base template. 
+
+For example, you can run:
+```bash
+docker run -d --name nginx1 nginx
+docker run -d --name nginx2 nginx
+```
+
+---
+
+### 8. Image is read-only
+This is a vital architectural concept. A Docker image is treated as **immutable (read-only)**. When Docker creates a container, it adds a temporary **writable layer** directly on top of the image structure.
+
+Conceptually:
+```text
+┌─────────────────────────────┐
+│  Container writable layer   │ ← changes occur here
+├─────────────────────────────┤
+│  nginx image layer          │ ← read-only
+├─────────────────────────────┤
+│  nginx image layer          │ ← read-only
+├─────────────────────────────┤
+│  Base image layer           │ ← read-only
+└─────────────────────────────┘
+```
+This architecture is known as a **layered filesystem**. We will study image layers in much more detail in the upcoming image-specific lessons.
+
+### The Complete Lifecycle
+
+Now put everything together:
+
+```text
+             Docker Image
+                  │
+                  │ docker run
+                  ↓
+          Container Created
+                  │
+                  ↓
+          Container Running
+                  │
+             docker stop
+                  ↓
+          Container Stopped
+                  │
+             docker start
+                  ↓
+          Container Running
+                  │
+              docker rm
+                  ↓
+          Container Deleted
+```
+# Important Docker Commands
+
+```bash
+# List images
+docker images
+
+# List running containers
+docker ps
+
+# List all containers
+docker ps -a
+
+# Create + start container
+docker run nginx
+
+# Run in background
+docker run -d nginx
+
+# Give container a name
+docker run -d --name my-nginx nginx
+
+# Stop
+docker stop my-nginx
+
+# Start stopped container
+docker start my-nginx
+
+# Remove container
+docker rm my-nginx
+
+# Force remove running container
+docker rm -f my-nginx
+```
+
+
